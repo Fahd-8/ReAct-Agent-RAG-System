@@ -1,20 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { MessageSquare, Search, Database, Send } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { MessageSquare, Search, Database, Send, Clock, User, Bot } from 'lucide-react';
 import axios from 'axios';
 
 const RAGInterface = () => {
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState([
-    { role: 'system', content: 'Welcome! Ask me anything and I\'ll use RAG to respond.' }
+    { role: 'system', content: 'Welcome! Ask me anything and I’ll use RAG to respond.', timestamp: new Date() }
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [newDocUrl, setNewDocUrl] = useState('');
+  const chatEndRef = useRef(null);
 
-  // Fetch ingested documents (optional, for display)
+  // Fetch documents (optional, if backend supports listing)
   const fetchDocuments = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/documents'); // Optional endpoint if implemented
+      const response = await axios.get('http://localhost:8000/documents'); // Optional endpoint
       setDocuments(response.data);
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -25,12 +26,15 @@ const RAGInterface = () => {
     fetchDocuments();
   }, []);
 
-  // Process a query
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const processQuery = async () => {
     if (!query.trim()) return;
 
     setIsProcessing(true);
-    setMessages(prev => [...prev, { role: 'user', content: query }]);
+    setMessages(prev => [...prev, { role: 'user', content: query, timestamp: new Date() }]);
 
     try {
       const response = await axios.post('http://localhost:8000/query', { query });
@@ -43,12 +47,14 @@ const RAGInterface = () => {
           id: doc.metadata.source || Math.random(),
           title: doc.metadata.source || 'Document',
           content: doc.content
-        }))
+        })),
+        timestamp: new Date()
       }]);
     } catch (error) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Error processing query. Please try again.'
+        content: 'Error processing query. Please try again.',
+        timestamp: new Date()
       }]);
     }
 
@@ -56,7 +62,6 @@ const RAGInterface = () => {
     setIsProcessing(false);
   };
 
-  // Add a document via URL
   const addDocument = async () => {
     if (!newDocUrl.trim()) return;
 
@@ -73,107 +78,123 @@ const RAGInterface = () => {
     }
   };
 
+  const formatTimestamp = (date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
-      <div className="bg-blue-600 text-white p-4">
-        <h1 className="text-xl font-bold">ReAct Pattern RAG Implementation</h1>
-      </div>
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-64 bg-gray-200 p-4 flex flex-col">
-          <h2 className="font-bold flex items-center gap-2 mb-4">
-            <Database size={18} /> Knowledge Base
+    <div className="rag-container">
+      {/* Header */}
+      <header className="rag-header">
+        <h1>ReAct Pattern RAG Implementation</h1>
+      </header>
+
+      <div className="rag-main">
+        {/* Knowledge Base Sidebar */}
+        <aside className="rag-sidebar knowledge-base">
+          <h2>
+            <Database className="inline-icon" /> Knowledge Base
           </h2>
-          <div className="mb-4">
-            <div className="flex gap-2 mb-2">
-              <input 
-                type="text" 
-                className="flex-1 p-2 text-sm rounded border" 
-                placeholder="Enter document URL" 
-                value={newDocUrl}
-                onChange={(e) => setNewDocUrl(e.target.value)}
-              />
-              <button 
-                className="bg-blue-500 text-white p-2 rounded"
-                onClick={addDocument}
-              >
-                +
-              </button>
-            </div>
+          <div className="input-group">
+            <input
+              type="text"
+              value={newDocUrl}
+              onChange={(e) => setNewDocUrl(e.target.value)}
+              placeholder="Enter document URL"
+            />
+            <button onClick={addDocument}>+</button>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="documents-list">
             {documents.map(doc => (
-              <div key={doc.id} className="bg-white p-2 rounded mb-2 text-sm">
-                <div className="font-bold">{doc.title}</div>
-                <div className="text-gray-600 truncate">{doc.content}</div>
+              <div key={doc.id} className="document-card">
+                <div className="document-title">{doc.title}</div>
+                <div className="document-content">{doc.content}</div>
               </div>
             ))}
           </div>
-        </div>
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 p-4 overflow-y-auto">
+        </aside>
+
+        {/* Chat Area */}
+        <main className="rag-chat">
+          <div className="chat-messages">
             {messages.map((msg, index) => (
-              <div key={index} className={`mb-4 ${msg.role === 'user' ? 'text-right' : ''}`}>
-                <div className={`inline-block p-3 rounded-lg ${
-                  msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-300 text-gray-800'
-                }`}>
-                  {msg.content}
+              <div key={index} className={`message ${msg.role === 'user' ? 'user-message' : 'assistant-message'}`}>
+                <div className="message-content">
+                  {msg.role === 'assistant' && <Bot className="message-icon" />}
+                  <div>
+                    <p>{msg.content}</p>
+                    <div className="message-timestamp">
+                      <Clock className="inline-icon" /> {formatTimestamp(msg.timestamp)}
+                    </div>
+                  </div>
+                  {msg.role === 'user' && <User className="message-icon" />}
                 </div>
                 {msg.retrievedDocs && (
-                  <div className="mt-2 bg-gray-100 p-2 rounded text-left text-sm">
-                    <div className="font-bold text-xs text-gray-500 flex items-center gap-1">
-                      <Search size={12} /> Retrieved Documents:
+                  <div className="retrieved-docs">
+                    <div className="docs-header">
+                      <Search className="inline-icon" /> Retrieved Documents
                     </div>
                     {msg.retrievedDocs.map(doc => (
-                      <div key={doc.id} className="mt-1">
-                        • {doc.title}
+                      <div key={doc.id} className="doc-item">
+                        • <span className="doc-title">{doc.title}</span>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
             ))}
+            <div ref={chatEndRef} />
           </div>
-          <div className="p-4 border-t">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                className="flex-1 p-2 border rounded"
-                placeholder="Ask a question..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && processQuery()}
-              />
-              <button 
-                className="bg-blue-500 text-white p-2 rounded"
-                onClick={processQuery}
-                disabled={isProcessing}
-              >
-                {isProcessing ? '...' : <Send size={20} />}
-              </button>
+          <div className="chat-input">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && processQuery()}
+              placeholder="Ask a question..."
+            />
+            <button onClick={processQuery} disabled={isProcessing}>
+              {isProcessing ? '...' : <Send className="inline-icon" />}
+            </button>
+          </div>
+        </main>
+
+        {/* ReAct Flow Sidebar */}
+        <aside className="rag-sidebar react-flow">
+          <h2>
+            <MessageSquare className="inline-icon" /> ReAct Flow
+          </h2>
+          <div className="flow-timeline">
+            <div className="flow-step">
+              <span className="step-number">1</span>
+              <div className="step-content">
+                <div className="step-title">User Query</div>
+                <div>User sends a question</div>
+              </div>
+            </div>
+            <div className="flow-step">
+              <span className="step-number">2</span>
+              <div className="step-content">
+                <div className="step-title">LLM Reasoning</div>
+                <div>AI understands the query intent</div>
+              </div>
+            </div>
+            <div className="flow-step">
+              <span className="step-number">3</span>
+              <div className="step-content">
+                <div className="step-title">Tool Usage</div>
+                <div>Retrieves relevant documents</div>
+              </div>
+            </div>
+            <div className="flow-step">
+              <span className="step-number">4</span>
+              <div className="step-content">
+                <div className="step-title">Response Generation</div>
+                <div>AI creates answer using retrieved info</div>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="w-64 bg-gray-200 p-4 overflow-y-auto">
-          <h2 className="font-bold flex items-center gap-2 mb-4">
-            <MessageSquare size={18} /> ReAct Flow
-          </h2>
-          <div className="bg-white p-3 rounded mb-3 text-sm">
-            <div className="font-bold text-blue-600">1. User Query</div>
-            <div className="text-gray-600">User sends a question</div>
-          </div>
-          <div className="bg-white p-3 rounded mb-3 text-sm">
-            <div className="font-bold text-purple-600">2. LLM Reasoning</div>
-            <div className="text-gray-600">AI understands the query intent</div>
-          </div>
-          <div className="bg-white p-3 rounded mb-3 text-sm">
-            <div className="font-bold text-green-600">3. Tool Usage</div>
-            <div className="text-gray-600">Retrieves relevant documents</div>
-          </div>
-          <div className="bg-white p-3 rounded mb-3 text-sm">
-            <div className="font-bold text-red-600">4. Response Generation</div>
-            <div className="text-gray-600">AI creates answer using retrieved info</div>
-          </div>
-        </div>
+        </aside>
       </div>
     </div>
   );
