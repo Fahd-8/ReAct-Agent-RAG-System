@@ -31,52 +31,37 @@ load_dotenv()
 
 class RAG_ReAct_Agent():
 
-    def __init__(self, groq_api_key=None, qdrant_url=None, qdrant_api_key=None, collection_name="drugs", qdrant_path=None):
+
+    def __init__(self, groq_api_key=None, collection_name="rag_collection"):
         """Initialize the RAG Project with components"""
-        # Set environment variables if provided
+        # Set API key if provided, otherwise use env
         if groq_api_key:
             os.environ["GROQ_API_KEY"] = groq_api_key
-        if qdrant_url:
-            os.environ["QDRANTWhenever_URL"] = qdrant_url
-        if qdrant_api_key:
-            os.environ["QDRANT_API_KEY"] = qdrant_api_key
 
-        # Validate required environment variables
+        # Check if API key is available
         if not os.environ.get("GROQ_API_KEY"):
-            raise ValueError("GROQ_API_KEY is required.")
-        if not os.environ.get("QDRANT_URL") and not qdrant_path:
-            raise ValueError("Either QDRANT_URL or qdrant_path is required.")
-        if os.environ.get("QDRANT_URL") and not os.environ.get("QDRANT_API_KEY"):
-            raise ValueError("QDRANT_API_KEY is required when using QDRANT_URL.")
-
-        # Initialize embedding model (sentence-transformers/all-MiniLM-L6-v2, 384 dimensions)
+            raise ValueError("Groq API key is required. Set it as an environment variable or pass it to constructor.")
+        
+        # Initialzie components
+        #Using HuggingFace embeddings instead of OpenAI
         self.embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"}
+            model_name = "sentence-transformers/all-MiniLM-L6-v2"
         )
 
-        # Initialize Groq LLM
+        # Using Groq's LLM 
         self.llm = ChatGroq(
-            model="llama3-70b-8192",
-            temperature=0.7,
-            max_tokens=4096
+            model = "llama3-70b-8192",
+            temperature=0.6
         )
 
-        # Initialize Qdrant client
+        #Initialize Qdrant client and collection
         self.collection_name = collection_name
-        if os.environ.get("QDRANT_URL"):
-            # Cloud-based Qdrant client
-            self.qdrant_client = qdrant_client.QdrantClient(
-                url=os.environ["QDRANT_URL"],
-                api_key=os.environ["QDRANT_API_KEY"]
-            )
-        else:
-            # Local Qdrant client
-            self.qdrant_client = qdrant_client.QdrantClient(path=qdrant_path)
-
-        # Initialize vector store
+        self.qdrant_client = qdrant_client.QdrantClient(location=":memory:")  # Using in-memory for simplicity
         self.vector_store = None
         self._initialize_vector_store()
+
+
+
 
 
     # def _initialize_vector_store():
