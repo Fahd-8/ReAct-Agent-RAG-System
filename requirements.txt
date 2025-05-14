@@ -1,3 +1,6 @@
 sentence_transformers
 flask
 langchain_community
+uvicorn
+fastapi
+langchain-huggingface
