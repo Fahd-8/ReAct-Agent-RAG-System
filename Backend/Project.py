@@ -45,7 +45,7 @@ class RAG_ReAct_Agent():
 
         # Using Groq's LLM 
         self.llm = ChatGroq(
-            model = "llama3-70b-8192",
+            model = "mixtral-8x7b-32768",
             temperature=0.6
         )
 
