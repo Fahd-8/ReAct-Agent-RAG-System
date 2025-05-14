@@ -1,271 +1,217 @@
-from typing import List, Dict, Any
-from dotenv import load_dotenv
-from bs4 import BeautifulSoup  # For better web scraping
-from langchain_core.documents import Document
-from langchain_core.vectorstores import VectorStore
-from langchain_core.embeddings import Embeddings
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
-import qdrant_client,re,json,os, requests, traceback
-from langchain_community.vectorstores import Qdrant 
-from typing import List, Dict
-from openai import OpenAI
-from groq import Groq
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue
-from typing import Any, Dict
-from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
+from langchain_community.vectorstores import Qdrant
+import qdrant_client
+from qdrant_client.models import Distance, VectorParams
+from langchain_core.documents import Document
+from typing import List, Dict, Any
+from datetime import datetime
+import os
 
-# Load environment variables
-load_dotenv()
-
-
-class RAG_ReAct_Agent():
-
-
-    def __init__(self, groq_api_key=None, collection_name="rag_collection"):
-        """Initialize the RAG Project with components"""
-        # Set API key if provided, otherwise use env
+class RAG_ReAct_Agent:
+    def __init__(self, groq_api_key=None, qdrant_url=None, qdrant_api_key=None, collection_name=None, qdrant_path=None):
+        """Initialize the RAG system without connecting to a default collection."""
         if groq_api_key:
             os.environ["GROQ_API_KEY"] = groq_api_key
+        if qdrant_url:
+            os.environ["QDRANT_URL"] = qdrant_url
+        if qdrant_api_key:
+            os.environ["QDRANT_API_KEY"] = qdrant_api_key
 
-        # Check if API key is available
         if not os.environ.get("GROQ_API_KEY"):
-            raise ValueError("Groq API key is required. Set it as an environment variable or pass it to constructor.")
-        
-        # Initialzie components
-        #Using HuggingFace embeddings instead of OpenAI
+            raise ValueError("GROQ_API_KEY is required.")
+        if not (os.environ.get("QDRANT_URL") or qdrant_path):
+            raise ValueError("Either QDRANT_URL or qdrant_path is required.")
+
         self.embedding_model = HuggingFaceEmbeddings(
-            model_name = "sentence-transformers/all-MiniLM-L6-v2"
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"}
         )
-
-        # Using Groq's LLM 
-        self.llm = ChatGroq(
-            model = "mixtral-8x7b-32768",
-            temperature=0.6
-        )
-
-        #Initialize Qdrant client and collection
+        self.embedding_dim = 384  # Dimension for sentence-transformers/all-MiniLM-L6-v2
+        self.llm = ChatGroq(model="llama3-70b-8192", temperature=0.7, max_tokens=4096)
         self.collection_name = collection_name
-        self.qdrant_client = qdrant_client.QdrantClient(location=":memory:")  # Using in-memory for simplicity
-        self.vector_store = None
-        self._initialize_vector_store()
 
-
-
-    def _initialize_vector_store(self):
-        """Initialize the Qdrant vectorstore"""
-        from langchain_community.vectorstores import Qdrant  # Import Qdrant vectorstore
-
-        # Check if collection exists
-        try:
-            # Use get_collection with the collection_name
-            collection_info = self.qdrant_client.get_collection(collection_name=self.collection_name)
-            # If the collection exists, connect to it
-            self.vector_store = Qdrant(
-                client=self.qdrant_client,
-                collection_name=self.collection_name,  # Corrected parameter name
-                embeddings=self.embedding_model
-            )
-        except Exception as e:
-            # Collection doesn't exist or other error (e.g., not found)
-            self.vector_store = None
-
-
-    def ingest_documents(self, texts: List[str], metadatas: List[Dict[str,Any]] = None) -> None:
-        """
-        Ingest documents into the vector store
-
-        Args:
-            text: List of text content
-            metadatas: Optional list of metadata dictionaries
-        """
-
-        if metadatas is None:
-            metadatas = [{} for _ in texts]
-        
-        documents = [Document(page_content=text, metadata=metadata)
-                     for text, metadata in zip(texts,metadatas)]
-        
-        #create or update vectorstore
-        if self.vector_store is None:
-            self.vector_store = Qdrant.from_documents(
-                documents,
-                self.embedding_model,
-                location=":memory:",
-                collection_name = self.collection_name,
+        if os.environ.get("QDRANT_URL"):
+            self.qdrant_client = qdrant_client.QdrantClient(
+                url=os.environ["QDRANT_URL"],
+                api_key=os.environ["QDRANT_API_KEY"]
             )
         else:
-            self.vector_store.add_documents(documents)
-        print(f"Ingested {len(documents)} documents into the Qdrant vector store")
+            self.qdrant_client = qdrant_client.QdrantClient(path=qdrant_path or "./qdrant_data")
 
+        self.vector_store = None
+        # Skip automatic connection to a default collection
+        # self._initialize_vector_store()
 
-
-    def ingest_from_url(self, url: str, metadata: Dict[str,Any] = None) -> None:
-        """
-        Fetch text from a URL and ingest it
-        
-        Args:
-            url: URL to fetch content from
-            metadata: Optional metadata to associate with the document
-        """
-
+    def _initialize_vector_store(self):
+        """Initialize or connect to a specific Qdrant vector store collection."""
+        if not self.collection_name:
+            raise ValueError("Collection name must be specified to initialize vector store.")
         try:
-            response = request.get(url)
-            response.raise_for_status()
-            text = response.text
-
-            if metadata is None:
-                meatadata = {"source": url}
+            collections = self.qdrant_client.get_collections().collections
+            collection_names = [collection.name for collection in collections]
+            if self.collection_name not in collection_names:
+                self.qdrant_client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE)
+                )
+                self.vector_store = Qdrant.from_texts(
+                    texts=["Initial placeholder document to create collection."],
+                    embedding=self.embedding_model,
+                    url=os.environ["QDRANT_URL"],
+                    api_key=os.environ["QDRANT_API_KEY"],
+                    collection_name=self.collection_name
+                )
+                print(f"Created new Qdrant collection: {self.collection_name}")
             else:
-                metadata["source"] = url
-            self.ingest_documents([text], [metadata])
+                self.vector_store = Qdrant(
+                    client=self.qdrant_client,
+                    collection_name=self.collection_name,
+                    embeddings=self.embedding_model
+                )
+                print(f"Connected to existing Qdrant collection: {self.collection_name}")
         except Exception as e:
-            print(f"Error fetching content from {url}: {e}")
+            print(f"Error initializing vector store: {e}")
+            self.vector_store = None
 
-    
+    def create_new_vector_store(self, new_collection_name: str):
+        """Create a new vector store in the Qdrant cluster and set it as the active vector store."""
+        try:
+            collections = self.qdrant_client.get_collections().collections
+            collection_names = [collection.name for collection in collections]
+            if new_collection_name in collection_names:
+                print(f"Collection {new_collection_name} already exists. Connecting to it.")
+                self.collection_name = new_collection_name
+                self._initialize_vector_store()
+                return
 
-    def retrieve(self, query:str, k:int=3) -> List[Document]:
-        """
-        Retrieve relevant documents for a query
+            # Create a new collection with the correct vector dimension (384)
+            self.qdrant_client.create_collection(
+                collection_name=new_collection_name,
+                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE)
+            )
+            # Initialize the new vector store with a placeholder document
+            self.collection_name = new_collection_name
+            self.vector_store = Qdrant.from_texts(
+                texts=["Initial placeholder document for new collection."],
+                embedding=self.embedding_model,
+                url=os.environ["QDRANT_URL"],
+                api_key=os.environ["QDRANT_API_KEY"],
+                collection_name=new_collection_name
+            )
+            print(f"Successfully created new vector store: {new_collection_name}")
+        except Exception as e:
+            print(f"Error creating new vector store {new_collection_name}: {e}")
+            raise
+
+    def ingest_documents(self, texts: List[str], metadatas: List[Dict[str, Any]] = None):
+        """Ingest documents into the vector store."""
+        if not texts or not isinstance(texts, list):
+            raise ValueError("At least one text must be provided as a non-empty list.")
+        if metadatas is None:
+            metadatas = [{} for _ in texts]
+        elif len(metadatas) != len(texts):
+            raise ValueError("Number of metadatas must match number of texts.")
         
-        Args:
-            query: The search query
-            k: Number of documents to retrieve
-            
-        Returns:
-            List of retrieved documents
-        """
-        if self.vector_store is None:
-            raise ValueError("No documents have been ingested yet")
-        
-        retrieved_docs = self.vector_store.similarity_search(query, k=k)
-        return retrieved_docs
-    
+        documents = [Document(page_content=text.strip() or "Empty document", metadata=metadata or {}) 
+                     for text, metadata in zip(texts, metadatas)]
+        try:
+            if self.vector_store is None:
+                self._initialize_vector_store()
+            self.vector_store.add_documents(documents)
+            print(f"Added {len(documents)} documents to vector store.")
+        except Exception as e:
+            print(f"Error ingesting documents: {e}")
+            raise
 
-    def format_docs(self, docs:List[Document]) -> str:
-        """Format documents into a string"""
-        return "\n\n".join(f"Document {i+i}: \n {doc.page_content}" for i, doc in enumerate(docs))
-    
-
-    def process_query(self,query: str) -> str:
-        """
-        Process a user query using the ReAct pattern
-        
-        Args:
-            query: User query
-            
-        Returns:
-            Response from the LLM
-        """
-        if self.vector_store is None:
-            raise ValueError("No documents have been ingested yet")
-        
-
-        #create retriever
-        retriever = self.vector_store.as_retriever(search_kwargs={"k":3})
-
-        # Setup the RAG prompt
-        template = """
-        You are an assistant that follows the ReAct pattern to answer questions.
-        
-        First, REASON about the question to understand what is being asked.
-        Think step by step:
-        1. What is the core information the user is looking for?
-        2. What context would be helpful to answer this question?
-        3. What specific details should I focus on in my response?
-        
-        Then, consider the following context retrieved from your knowledge base:
-        
-        {context}
-        
-        Based on this context and your reasoning, GENERATE a helpful answer to the question: {question}
-        
-        If the context doesn't contain enough information, you can say so and provide the best answer 
-        based on your general knowledge.
-        """
-
-        prompt = ChatPromptTemplate.from_template(template)
-
-        # Create the RAG chain
-
-        rag_chain = (
-
-            {"context": retriever | self.format_docs, "question": RunnablePassthrough()}
-            | prompt
-            | self.llm
-            | StrOutputParser()
-        )
-
-        #Proccess the query
-        response =rag_chain.invoke(query)
-        return response
-    
-
-
-    def run_interactive(self):
-        """Run an interactive session with the RAG system"""
-        print("Welcome to RAG Interactive Mode!")
-        print("Type 'exit' to quit, 'ingest <url>' to add content, or any question to query." )
-
-
-        while True:
-            user_input = input("\nYou: ").strip()
-
-#             
-            if user_input.lower == 'exit':
-                print("Goodbye!")
-                break
-
-            elif user_input.lower().startswith('ingest '):
-                url = user_input[7:].strip()
-                print(f"Ingesting content from: {url}")
-                self.ingest_from_url(url)
-
+    def ingest_from_url(self, url: str, metadata: Dict[str, Any] = None):
+        """Fetch and ingest text from a URL."""
+        if not url or not isinstance(url, str):
+            raise ValueError("A valid URL string is required.")
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            for element in soup(["script", "style", "nav", "footer"]):
+                element.decompose()
+            paragraphs = soup.find_all(["p", "h1", "h2", "h3", "article"])
+            text = " ".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
+            if not text.strip():
+                raise ValueError("No meaningful text extracted from URL.")
+            if metadata is None:
+                metadata = {"source": url, "fetched_at": str(datetime.now())}
             else:
-                try:
-                    if self.vector_store is None:
-                        print("No documents have been ingested yet. Please ingest some content first.")
-                        continue
-                    response= self.process_query(user_input)
-                    print(f"\nAssistant: {response}")
-                except Exception as e:
-                    print(f"Error processing query: {e}")
+                metadata.update({"source": url, "fetched_at": str(datetime.now())})
+            self.ingest_documents([text], [metadata])
+            print(f"Successfully ingested content from {url}")
+        except Exception as e:
+            print(f"Error processing URL {url}: {e}")
+            raise
 
+    def process_query(self, query: str) -> Dict[str, Any]:
+        """Process a query using the ReAct pattern."""
+        if self.vector_store is None or not self.list_documents():
+            raise ValueError("No documents have been ingested yet.")
+        try:
+            # Retrieve relevant documents
+            retrieved_docs = self.vector_store.similarity_search(query, k=3)
+            # Prepare context from retrieved documents
+            context = "\n".join([doc.page_content for doc in retrieved_docs])
+            # Generate response with LLM
+            response = self.llm.invoke(f"Context: {context}\n\nQuestion: {query}\nAnswer:")
+            return {
+                "answer": response.content,
+                "retrieved_docs": [
+                    {
+                        "id": str(i),
+                        "metadata": doc.metadata,
+                        "content": doc.page_content
+                    } for i, doc in enumerate(retrieved_docs)
+                ]
+            }
+        except Exception as e:
+            print(f"Error processing query: {e}")
+            raise
 
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """List all documents in the vector store with their metadata."""
+        if self.vector_store is None:
+            return []
+        try:
+            # Use scroll to fetch all points from the collection
+            scroll_result = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                limit=1000
+            )
+            points = scroll_result[0]
+            return [
+                {
+                    "id": str(point.id),
+                    "title": point.payload.get("metadata", {}).get("source", "Unknown")
+                } for point in points
+            ]
+        except Exception as e:
+            print(f"Error listing documents: {e}")
+            return []
 
-
-
-# Example usage
 if __name__ == "__main__":
-    # Create a RAG project
-    rag = RAG_ReAct_Agent()
+    # Initialize the RAG project without a default collection
+    rag = RAG_ReAct_Agent(
+        groq_api_key=os.environ["GROQ_API_KEY"],
+        qdrant_url=os.environ["QDRANT_URL"],
+        qdrant_api_key=os.environ["QDRANT_API_KEY"]
+    )
     
-    # Example data - ingest some documents
-    example_texts = [
-        "RAG stands for Retrieval-Augmented Generation. It's a technique that enhances LLM responses with external knowledge.",
-        "The ReAct pattern combines reasoning and acting in AI systems. It involves reasoning about a query, taking actions, and generating responses.",
-        "Vector databases store embeddings which are numerical representations of text, images, or other data that capture semantic meaning."
-    ]
+    # Create a new vector store named 'ReAct_Rag'
+    rag.create_new_vector_store("ReAct_Rag")
     
-    example_metadata = [
-        {"source": "RAG documentation", "topic": "RAG basics"},
-        {"source": "ReAct paper", "topic": "AI patterns"},
-        {"source": "Vector DB guide", "topic": "Embeddings"}
-    ]
+    # Ingest documents into the 'ReAct_Rag' collection
+    rag.ingest_from_url("https://en.wikipedia.org/wiki/Aspirin")
     
-    # Ingest the example documents
-    rag.ingest_documents(example_texts, example_metadata)
-    
-    # Option 1: Process a single query
-    query = "What is RAG and how does it relate to the ReAct pattern?"
+    # Process a query using the 'ReAct_Rag' collection
+    query = "What is aspirin used for?"
     response = rag.process_query(query)
     print(f"Query: {query}")
     print(f"Response: {response}")
-    
-    # Option 2: Run interactive mode
-    # rag.run_interactive()

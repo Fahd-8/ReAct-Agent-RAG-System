@@ -12,20 +12,28 @@ const RAGInterface = () => {
   const [newDocUrl, setNewDocUrl] = useState('');
   const chatEndRef = useRef(null);
 
-  // Fetch documents (optional, if backend supports listing)
+  // Fetch documents from the backend
   const fetchDocuments = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/documents'); // Optional endpoint
-      setDocuments(response.data);
+      const response = await axios.get('http://localhost:8000/documents');
+      // Extract the 'documents' array from the response, default to empty array if undefined
+      const docList = response.data.documents || [];
+      setDocuments(docList);
     } catch (error) {
       console.error('Error fetching documents:', error);
+      setDocuments([]); // Fallback to empty array on error
     }
   };
 
+  // Initial fetch and optional polling for document updates
   useEffect(() => {
     fetchDocuments();
+    // Optional: Poll every 10 seconds for document updates
+    const interval = setInterval(fetchDocuments, 10000);
+    return () => clearInterval(interval); // Cleanup on unmount
   }, []);
 
+  // Auto-scroll to the latest message
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -42,18 +50,19 @@ const RAGInterface = () => {
 
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: answer,
-        retrievedDocs: retrieved_docs.map(doc => ({
-          id: doc.metadata.source || Math.random(),
-          title: doc.metadata.source || 'Document',
-          content: doc.content
+        content: answer || 'No answer provided.',
+        retrievedDocs: (retrieved_docs || []).map(doc => ({
+          id: doc.metadata?.source || Math.random().toString(),
+          title: doc.metadata?.source || 'Document',
+          content: doc.content || 'No content available.'
         })),
         timestamp: new Date()
       }]);
     } catch (error) {
+      console.error('Error processing query:', error);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Error processing query. Please try again.',
+        content: `Error processing query: ${error.response?.data?.detail || error.message}`,
         timestamp: new Date()
       }]);
     }
@@ -67,14 +76,16 @@ const RAGInterface = () => {
 
     try {
       await axios.post('http://localhost:8000/ingest', { url: newDocUrl });
-      setDocuments(prev => [...prev, {
-        id: Math.random(),
-        title: `Document from ${newDocUrl.substring(0, 20)}...`,
-        content: `Content from ${newDocUrl}`
-      }]);
       setNewDocUrl('');
+      // Refresh the document list from the backend
+      await fetchDocuments();
     } catch (error) {
       console.error('Error ingesting document:', error);
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Error ingesting document: ${error.response?.data?.detail || error.message}`,
+        timestamp: new Date()
+      }]);
     }
   };
 
@@ -102,15 +113,21 @@ const RAGInterface = () => {
               onChange={(e) => setNewDocUrl(e.target.value)}
               placeholder="Enter document URL"
             />
-            <button onClick={addDocument}>+</button>
+            <button onClick={addDocument} disabled={!newDocUrl.trim()}>
+              +
+            </button>
           </div>
           <div className="documents-list">
-            {documents.map(doc => (
-              <div key={doc.id} className="document-card">
-                <div className="document-title">{doc.title}</div>
-                <div className="document-content">{doc.content}</div>
-              </div>
-            ))}
+            {documents.length > 0 ? (
+              documents.map(doc => (
+                <div key={doc.id} className="document-card">
+                  <div className="document-title">{doc.title || 'Untitled Document'}</div>
+                  <div className="document-content">{doc.content || 'No content available.'}</div>
+                </div>
+              ))
+            ) : (
+              <p>No documents available.</p>
+            )}
           </div>
         </aside>
 
@@ -121,6 +138,7 @@ const RAGInterface = () => {
               <div key={index} className={`message ${msg.role === 'user' ? 'user-message' : 'assistant-message'}`}>
                 <div className="message-content">
                   {msg.role === 'assistant' && <Bot className="message-icon" />}
+                  {msg.role === 'system' && <Database className="message-icon" />}
                   <div>
                     <p>{msg.content}</p>
                     <div className="message-timestamp">
@@ -129,7 +147,7 @@ const RAGInterface = () => {
                   </div>
                   {msg.role === 'user' && <User className="message-icon" />}
                 </div>
-                {msg.retrievedDocs && (
+                {msg.retrievedDocs && msg.retrievedDocs.length > 0 && (
                   <div className="retrieved-docs">
                     <div className="docs-header">
                       <Search className="inline-icon" /> Retrieved Documents
@@ -152,6 +170,7 @@ const RAGInterface = () => {
               onChange={(e) => setQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && processQuery()}
               placeholder="Ask a question..."
+              disabled={isProcessing}
             />
             <button onClick={processQuery} disabled={isProcessing}>
               {isProcessing ? '...' : <Send className="inline-icon" />}
