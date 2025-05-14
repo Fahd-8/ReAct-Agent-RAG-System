@@ -62,10 +62,46 @@ class RAG_ReAct_Agent():
 
 
 
+    def _initialize_vector_store(self):
+        """Initialize the Qdrant vectorstore"""
+        # Check if collection exists, if not create it
+        collections = self.qdrant_client.get_collection().collections
+        collection_names = [collection.name for collection in collections]
+
+        if self.collection_name not in collection_names:
+            # Collection doesnt exist yet, it will be created when we add documents
+            self.vector_store= None
+        else:
+            #Connect to existing collection
+            self.vector_store = Qdrant(
+                client = self.qdrant_client,
+                collections_name = self.collection_name,
+                embeddings = self.embedding_model
+            )
+            
 
 
-    # def _initialize_vector_store():
 
+
+
+
+
+    # def _initialize_vector_store(self):
+    #     """Initialize the Qdrant vector store"""
+    #     # Check if collection exists, if not create it
+    #     collections = self.qdrant_client.get_collections().collections
+    #     collection_names = [collection.name for collection in collections]
+        
+    #     if self.collection_name not in collection_names:
+    #         # Collection doesn't exist yet, it will be created when we add documents
+    #         self.vector_store = None
+    #     else:
+    #         # Connect to existing collection
+    #         self.vector_store = Qdrant(
+    #             client=self.qdrant_client,
+    #             collection_name=self.collection_name,
+    #             embeddings=self.embedding_model
+    #         )
 
     # def ingest_documents():
 
