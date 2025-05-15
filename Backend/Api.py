@@ -16,9 +16,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize RAG system with API keys or local path
-os.environ["GROQ_API_KEY"] = "your_groq_api_key"  # Replace with your actual key
-rag = RAG_ReAct_Agent(groq_api_key=os.environ["GROQ_API_KEY"], qdrant_path="./qdrant_data")
+# Initialize RAG system with Qdrant Cloud credentials and ReAct_Rag collection
+rag = RAG_ReAct_Agent(
+    groq_api_key=os.environ["GROQ_API_KEY"],
+    qdrant_url=os.environ["QDRANT_URL"],
+    qdrant_api_key=os.environ["QDRANT_API_KEY"]
+)
+
+# Create or connect to the ReAct_Rag vector store
+rag.create_new_vector_store("ReAct_Rag")
 
 class IngestRequest(BaseModel):
     texts: List[str] = None
@@ -53,20 +59,10 @@ async def query(request: QueryRequest):
 @app.get("/documents")
 async def get_documents():
     try:
-        if rag.vector_store is None:
-            return {"documents": []}
-        # Use qdrant_client to fetch documents
-        scroll_result = rag.qdrant_client.scroll(
-            collection_name=rag.collection_name,
-            limit=1000
-        )
-        points = scroll_result[0]
-        documents = [
-            {"id": str(point.id), "title": point.payload.get("metadata", {}).get("source", "Unknown")}
-            for point in points
-        ]
+        documents = rag.list_documents()
         return {"documents": documents}
     except Exception as e:
+        print(f"Error fetching documents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching documents: {str(e)}")
 
 if __name__ == "__main__":

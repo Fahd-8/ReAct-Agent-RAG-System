@@ -40,8 +40,6 @@ class RAG_ReAct_Agent:
             self.qdrant_client = qdrant_client.QdrantClient(path=qdrant_path or "./qdrant_data")
 
         self.vector_store = None
-        # Skip automatic connection to a default collection
-        # self._initialize_vector_store()
 
     def _initialize_vector_store(self):
         """Initialize or connect to a specific Qdrant vector store collection."""
@@ -85,12 +83,10 @@ class RAG_ReAct_Agent:
                 self._initialize_vector_store()
                 return
 
-            # Create a new collection with the correct vector dimension (384)
             self.qdrant_client.create_collection(
                 collection_name=new_collection_name,
                 vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE)
             )
-            # Initialize the new vector store with a placeholder document
             self.collection_name = new_collection_name
             self.vector_store = Qdrant.from_texts(
                 texts=["Initial placeholder document for new collection."],
@@ -114,7 +110,7 @@ class RAG_ReAct_Agent:
             raise ValueError("Number of metadatas must match number of texts.")
         
         documents = [Document(page_content=text.strip() or "Empty document", metadata=metadata or {}) 
-                     for text, metadata in zip(texts, metadatas)]
+                    for text, metadata in zip(texts, metadatas)]
         try:
             if self.vector_store is None:
                 self._initialize_vector_store()
@@ -155,11 +151,20 @@ class RAG_ReAct_Agent:
         if self.vector_store is None or not self.list_documents():
             raise ValueError("No documents have been ingested yet.")
         try:
-            # Retrieve relevant documents
-            retrieved_docs = self.vector_store.similarity_search(query, k=3)
-            # Prepare context from retrieved documents
-            context = "\n".join([doc.page_content for doc in retrieved_docs])
-            # Generate response with LLM
+            # Retrieve fewer documents to reduce token count
+            retrieved_docs = self.vector_store.similarity_search(query, k=1)  # Reduced from k=3 to k=1
+            # Truncate each document to reduce token count
+            max_chars_per_doc = 6000  # Roughly 1500 tokens per doc (6000 chars / 4)
+            truncated_docs = []
+            for doc in retrieved_docs:
+                if len(doc.page_content) > max_chars_per_doc:
+                    doc.page_content = doc.page_content[:max_chars_per_doc] + "..."
+                truncated_docs.append(doc)
+            context = "\n".join([doc.page_content for doc in truncated_docs])
+            # Further truncate the entire context if needed
+            max_total_chars = 20000  # Roughly 5000 tokens (20000 chars / 4)
+            if len(context) > max_total_chars:
+                context = context[:max_total_chars] + "..."
             response = self.llm.invoke(f"Context: {context}\n\nQuestion: {query}\nAnswer:")
             return {
                 "answer": response.content,
@@ -168,7 +173,7 @@ class RAG_ReAct_Agent:
                         "id": str(i),
                         "metadata": doc.metadata,
                         "content": doc.page_content
-                    } for i, doc in enumerate(retrieved_docs)
+                    } for i, doc in enumerate(truncated_docs)
                 ]
             }
         except Exception as e:
@@ -177,40 +182,44 @@ class RAG_ReAct_Agent:
 
     def list_documents(self) -> List[Dict[str, Any]]:
         """List all documents in the vector store with their metadata."""
-        if self.vector_store is None:
+        if self.vector_store is None or not self.collection_name:
             return []
         try:
-            # Use scroll to fetch all points from the collection
             scroll_result = self.qdrant_client.scroll(
                 collection_name=self.collection_name,
                 limit=1000
             )
-            points = scroll_result[0]
-            return [
-                {
+            points = scroll_result[0]  # Points are in the first element of the tuple
+            if points is None or not points:
+                return []  # Return empty list if no points are found
+            documents = []
+            for point in points:
+                if not hasattr(point, 'payload') or point.payload is None:
+                    continue  # Skip points with no payload
+                metadata = point.payload.get("metadata", {})
+                if not isinstance(metadata, dict):  # Ensure metadata is a dict
+                    continue
+                title = metadata.get("source", "Unknown")
+                documents.append({
                     "id": str(point.id),
-                    "title": point.payload.get("metadata", {}).get("source", "Unknown")
-                } for point in points
-            ]
+                    "title": title
+                })
+            return documents
         except Exception as e:
             print(f"Error listing documents: {e}")
             return []
 
 if __name__ == "__main__":
-    # Initialize the RAG project without a default collection
     rag = RAG_ReAct_Agent(
         groq_api_key=os.environ["GROQ_API_KEY"],
         qdrant_url=os.environ["QDRANT_URL"],
         qdrant_api_key=os.environ["QDRANT_API_KEY"]
     )
     
-    # Create a new vector store named 'ReAct_Rag'
     rag.create_new_vector_store("ReAct_Rag")
     
-    # Ingest documents into the 'ReAct_Rag' collection
     rag.ingest_from_url("https://en.wikipedia.org/wiki/Aspirin")
     
-    # Process a query using the 'ReAct_Rag' collection
     query = "What is aspirin used for?"
     response = rag.process_query(query)
     print(f"Query: {query}")

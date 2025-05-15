@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MessageSquare, Search, Database, Send, Clock, User, Bot } from 'lucide-react';
 import axios from 'axios';
 
@@ -10,28 +10,42 @@ const RAGInterface = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [newDocUrl, setNewDocUrl] = useState('');
+  const [isFetchingDocs, setIsFetchingDocs] = useState(false);
+  const [isIngesting, setIsIngesting] = useState(false);
   const chatEndRef = useRef(null);
 
   // Fetch documents from the backend
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
+    setIsFetchingDocs(true);
     try {
       const response = await axios.get('http://localhost:8000/documents');
-      // Extract the 'documents' array from the response, default to empty array if undefined
       const docList = response.data.documents || [];
       setDocuments(docList);
     } catch (error) {
       console.error('Error fetching documents:', error);
-      setDocuments([]); // Fallback to empty array on error
+      setDocuments([]);
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Error fetching documents: ${error.response?.data?.detail || error.message}`,
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsFetchingDocs(false);
     }
-  };
+  }, []);
 
-  // Initial fetch and optional polling for document updates
+  // Initial fetch and polling for document updates
   useEffect(() => {
     fetchDocuments();
-    // Optional: Poll every 10 seconds for document updates
-    const interval = setInterval(fetchDocuments, 10000);
-    return () => clearInterval(interval); // Cleanup on unmount
-  }, []);
+    const interval = setInterval(() => {
+      console.log('Polling documents...'); // Debug log to confirm interval
+      fetchDocuments();
+    }, 30000); // Poll every 30 seconds
+    return () => {
+      console.log('Clearing interval...'); // Debug log to confirm cleanup
+      clearInterval(interval);
+    };
+  }, [fetchDocuments]);
 
   // Auto-scroll to the latest message
   useEffect(() => {
@@ -74,11 +88,16 @@ const RAGInterface = () => {
   const addDocument = async () => {
     if (!newDocUrl.trim()) return;
 
+    setIsIngesting(true);
     try {
       await axios.post('http://localhost:8000/ingest', { url: newDocUrl });
       setNewDocUrl('');
-      // Refresh the document list from the backend
-      await fetchDocuments();
+      await fetchDocuments(); // Refresh the document list immediately
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Successfully ingested document from ${newDocUrl}`,
+        timestamp: new Date()
+      }]);
     } catch (error) {
       console.error('Error ingesting document:', error);
       setMessages(prev => [...prev, {
@@ -86,6 +105,8 @@ const RAGInterface = () => {
         content: `Error ingesting document: ${error.response?.data?.detail || error.message}`,
         timestamp: new Date()
       }]);
+    } finally {
+      setIsIngesting(false);
     }
   };
 
@@ -112,17 +133,19 @@ const RAGInterface = () => {
               value={newDocUrl}
               onChange={(e) => setNewDocUrl(e.target.value)}
               placeholder="Enter document URL"
+              disabled={isIngesting}
             />
-            <button onClick={addDocument} disabled={!newDocUrl.trim()}>
-              +
+            <button onClick={addDocument} disabled={isIngesting || !newDocUrl.trim()}>
+              {isIngesting ? '...' : '+'}
             </button>
           </div>
           <div className="documents-list">
-            {documents.length > 0 ? (
+            {isFetchingDocs ? (
+              <p>Loading documents...</p>
+            ) : documents.length > 0 ? (
               documents.map(doc => (
                 <div key={doc.id} className="document-card">
                   <div className="document-title">{doc.title || 'Untitled Document'}</div>
-                  <div className="document-content">{doc.content || 'No content available.'}</div>
                 </div>
               ))
             ) : (
