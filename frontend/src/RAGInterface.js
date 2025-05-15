@@ -38,11 +38,11 @@ const RAGInterface = () => {
   useEffect(() => {
     fetchDocuments();
     const interval = setInterval(() => {
-      console.log('Polling documents...'); // Debug log to confirm interval
+      console.log('Polling documents...');
       fetchDocuments();
-    }, 30000); // Poll every 30 seconds
+    }, 30000);
     return () => {
-      console.log('Clearing interval...'); // Debug log to confirm cleanup
+      console.log('Clearing interval...');
       clearInterval(interval);
     };
   }, [fetchDocuments]);
@@ -92,7 +92,7 @@ const RAGInterface = () => {
     try {
       await axios.post('http://localhost:8000/ingest', { url: newDocUrl });
       setNewDocUrl('');
-      await fetchDocuments(); // Refresh the document list immediately
+      await fetchDocuments();
       setMessages(prev => [...prev, {
         role: 'system',
         content: `Successfully ingested document from ${newDocUrl}`,
@@ -116,13 +116,10 @@ const RAGInterface = () => {
 
   return (
     <div className="rag-container">
-      {/* Header */}
       <header className="rag-header">
         <h1>ReAct Pattern RAG Implementation</h1>
       </header>
-
       <div className="rag-main">
-        {/* Knowledge Base Sidebar */}
         <aside className="rag-sidebar knowledge-base">
           <h2>
             <Database className="inline-icon" /> Knowledge Base
@@ -153,8 +150,6 @@ const RAGInterface = () => {
             )}
           </div>
         </aside>
-
-        {/* Chat Area */}
         <main className="rag-chat">
           <div className="chat-messages">
             {messages.map((msg, index) => (
@@ -162,26 +157,26 @@ const RAGInterface = () => {
                 <div className="message-content">
                   {msg.role === 'assistant' && <Bot className="message-icon" />}
                   {msg.role === 'system' && <Database className="message-icon" />}
-                  <div>
+                  <div className="message-text">
                     <p>{msg.content}</p>
+                    {msg.retrievedDocs && msg.retrievedDocs.length > 0 && (
+                      <div className="retrieved-docs">
+                        <div className="docs-header">
+                          <Search className="inline-icon" /> Retrieved Documents
+                        </div>
+                        {msg.retrievedDocs.map(doc => (
+                          <div key={doc.id} className="doc-item">
+                            • <span className="doc-title">{doc.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="message-timestamp">
                       <Clock className="inline-icon" /> {formatTimestamp(msg.timestamp)}
                     </div>
                   </div>
                   {msg.role === 'user' && <User className="message-icon" />}
                 </div>
-                {msg.retrievedDocs && msg.retrievedDocs.length > 0 && (
-                  <div className="retrieved-docs">
-                    <div className="docs-header">
-                      <Search className="inline-icon" /> Retrieved Documents
-                    </div>
-                    {msg.retrievedDocs.map(doc => (
-                      <div key={doc.id} className="doc-item">
-                        • <span className="doc-title">{doc.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
             <div ref={chatEndRef} />
@@ -195,13 +190,11 @@ const RAGInterface = () => {
               placeholder="Ask a question..."
               disabled={isProcessing}
             />
-            <button onClick={processQuery} disabled={isProcessing}>
+            <button onClick={processQuery} disabled={isIngesting || isProcessing}>
               {isProcessing ? '...' : <Send className="inline-icon" />}
             </button>
           </div>
         </main>
-
-        {/* ReAct Flow Sidebar */}
         <aside className="rag-sidebar react-flow">
           <h2>
             <MessageSquare className="inline-icon" /> ReAct Flow
