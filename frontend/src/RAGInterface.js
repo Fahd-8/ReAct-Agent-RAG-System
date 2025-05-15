@@ -20,7 +20,12 @@ const RAGInterface = () => {
     try {
       const response = await axios.get('http://localhost:8000/documents');
       const docList = response.data.documents || [];
-      setDocuments(docList);
+      const enhancedDocs = docList.map(doc => ({
+        ...doc,
+        derivedTitle: doc.title.split('/').pop() || 'Untitled Document',
+        sourceType: doc.title.includes('wikipedia.org') ? 'Wikipedia Article' : 'Web Resource'
+      }));
+      setDocuments(enhancedDocs);
     } catch (error) {
       console.error('Error fetching documents:', error);
       setDocuments([]);
@@ -47,9 +52,15 @@ const RAGInterface = () => {
     };
   }, [fetchDocuments]);
 
-  // Auto-scroll to the latest message
+  // Auto-scroll to the latest message only if user is at the bottom
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const chatMessages = chatEndRef.current?.parentElement;
+    if (chatMessages) {
+      const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop === chatMessages.clientHeight;
+      if (isAtBottom) {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
   }, [messages]);
 
   const processQuery = async () => {
@@ -117,7 +128,7 @@ const RAGInterface = () => {
   return (
     <div className="rag-container">
       <header className="rag-header">
-        <h1>ReAct Pattern RAG Implementation</h1>
+        <h1>Reasoning & Action RAG</h1>
       </header>
       <div className="rag-main">
         <aside className="rag-sidebar knowledge-base">
@@ -138,15 +149,19 @@ const RAGInterface = () => {
           </div>
           <div className="documents-list">
             {isFetchingDocs ? (
-              <p>Loading documents...</p>
+              <p className="loading-state">Loading documents...</p>
             ) : documents.length > 0 ? (
               documents.map(doc => (
                 <div key={doc.id} className="document-card">
-                  <div className="document-title">{doc.title || 'Untitled Document'}</div>
+                  <div className="document-header">
+                    <h3 className="document-title">{doc.derivedTitle}</h3>
+                    <span className="document-type">{doc.sourceType}</span>
+                  </div>
+                  <p className="document-preview">Source: {doc.title}</p>
                 </div>
               ))
             ) : (
-              <p>No documents available.</p>
+              <p className="no-documents">No documents available.</p>
             )}
           </div>
         </aside>
