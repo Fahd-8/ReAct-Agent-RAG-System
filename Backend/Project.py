@@ -217,7 +217,7 @@ if __name__ == "__main__":
     )
     
     rag.create_new_vector_store("ReAct_Rag")
-    
+    #---
     rag.ingest_from_url("https://en.wikipedia.org/wiki/Aspirin")
     
     query = "What is aspirin used for?"
