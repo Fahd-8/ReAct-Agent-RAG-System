@@ -4,3 +4,4 @@ langchain_community
 uvicorn
 fastapi
 langchain-huggingface
+flask
