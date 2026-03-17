@@ -1,28 +1,62 @@
-**Usage**
+# ReAct Agent RAG System
 
-Enter a document URL in the Knowledge Base to ingest new content.
+A full-stack RAG system with a ReAct (Reasoning + Acting) agent, 
+conversational UI, and real-time Knowledge Base visualization. 
+Delivers intelligent, document-augmented responses with full 
+reasoning transparency.
 
-Ask questions in the chat area to receive responses augmented by retrieved documents.
+## What It Does
 
-Toggle the Knowledge Base and ReAct Flow sidebars for an optimized view.
+- Ingests documents via URL into a live Knowledge Base
+- Uses ReAct agent loop — reasons step-by-step before answering
+- Retrieves relevant context from ingested documents
+- Shows the full ReAct reasoning flow in a collapsible sidebar
+- Responsive conversational UI built with React
 
-Test responsiveness by resizing the browser window.
+## Tech Stack
 
+- **ReAct Agent** — reasoning + acting loop for intelligent responses
+- **RAG Pipeline** — document ingestion + semantic retrieval
+- **React Frontend** — conversational UI with Knowledge Base panel
+- **FastAPI Backend** — API layer and agent orchestration
+- **Python** — core agent and retrieval logic
 
-**Technologies**
+## Architecture
+```
+User Query → ReAct Agent Loop → Reasoning Step
+→ RAG Retrieval (Knowledge Base) → Action
+→ Final Answer + Reasoning Trace
+```
 
-React: For the frontend interface.
+## Key Features
 
-Axios: For API requests.
+- **ReAct Flow Visualization** — see exactly how the agent reasons
+- **Collapsible Knowledge Base** — manage ingested documents live
+- **Document URL ingestion** — add any document to context instantly
+- **Full-stack** — frontend + backend in one repo
 
-Lucide-React: For icons.
+## Setup
+```bash
+git clone https://github.com/Fahd-8/ReAct-Agent-RAG-System
+cd ReAct-Agent-RAG-System
 
-CSS: Custom styling with a professional dark theme.
+# Backend
+cd Backend
+pip install -r requirements.txt
+python main.py
 
-Node.js: For development environment.
+# Frontend
+cd frontend
+npm install
+npm start
+```
 
+## Usage
 
-**Contributing**
+1. Enter a document URL in the Knowledge Base to ingest content
+2. Ask questions in the chat area
+3. Toggle ReAct Flow sidebar to see agent reasoning steps
+4. Toggle Knowledge Base sidebar to manage documents
 
-Contributions are welcome! Please fork the repository and submit pull requests with your improvements. Ensure to follow the existing code style and include tests where applicable.
-
+---
+Built by [Fahad Zaman](https://github.com/Fahd-8) — AI Engineer
